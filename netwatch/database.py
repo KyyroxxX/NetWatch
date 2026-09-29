@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -15,7 +16,7 @@ def get_connection():
 
 
 def init_database():
-    with get_connection() as connection:
+    with closing(get_connection()) as connection:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS measurements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,9 +38,11 @@ def init_database():
             ON measurements(timestamp)
         """)
 
+        connection.commit()
+
 
 def save_measurement(result):
-    with get_connection() as connection:
+    with closing(get_connection()) as connection:
         connection.execute("""
             INSERT INTO measurements (
                 host, reachable, latency_ms, packet_loss, timestamp
@@ -53,13 +56,18 @@ def save_measurement(result):
             result.timestamp,
         ))
 
+        connection.commit()
+
 
 def get_host_summary(host):
-    with get_connection() as connection:
-        return connection.execute("""
+    with closing(get_connection()) as connection:
+        row = connection.execute("""
             SELECT
                 COUNT(*) AS total_checks,
-                COALESCE(SUM(CASE WHEN reachable = 0 THEN 1 ELSE 0 END), 0) AS failures,
+                COALESCE(
+                    SUM(CASE WHEN reachable = 0 THEN 1 ELSE 0 END),
+                    0
+                ) AS failures,
                 MIN(latency_ms) AS min_latency,
                 MAX(latency_ms) AS max_latency,
                 AVG(latency_ms) AS avg_latency
@@ -67,15 +75,19 @@ def get_host_summary(host):
             WHERE host = ?
         """, (host,)).fetchone()
 
+        return row
+
 
 def get_recent_measurements(limit=20):
-    with get_connection() as connection:
-        return connection.execute("""
+    if limit < 1:
+        raise ValueError("Limit must be greater than zero")
+
+    with closing(get_connection()) as connection:
+        rows = connection.execute("""
             SELECT host, reachable, latency_ms, timestamp
             FROM measurements
             ORDER BY timestamp DESC
             LIMIT ?
         """, (limit,)).fetchall()
 
-
-
+        return rows
